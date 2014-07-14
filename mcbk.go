@@ -97,14 +97,14 @@ func doBupBackup() error {
 	if err != nil {
 		return err
 	}
-
-	cmd := exec.Command("bup", "-d", getCurrentBupRepoPath(), "index", MINECRAFT_DIR)
+	bupPath := getCurrentBupRepoPath()
+	cmd := exec.Command("bup", "-d", bupPath, "index", MINECRAFT_DIR)
 	err = cmd.Run()
 	if err != nil {
 		return err
 	}
 
-	cmd = exec.Command("bup", "-d", getCurrentBupRepoPath(), "save", "-n", BUP_BRANCH_NAME, MINECRAFT_DIR)
+	cmd = exec.Command("bup", "-d", bupPath, "save", "-n", BUP_BRANCH_NAME, MINECRAFT_DIR)
 	err = cmd.Run()
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func createBackupDirIfNeeded() error {
 
 	if !dirExists {
 		os.MkdirAll(bupPath, 0770)
-		cmd := exec.Command("bup", "-d", getCurrentBupRepoPath(), "init")
+		cmd := exec.Command("bup", "-d", bupPath, "init")
 		err = cmd.Run()
 		if err != nil {
 			return err
