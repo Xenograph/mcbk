@@ -4,4 +4,6 @@ default, it will create one bup repository for each month of backups, and delete
 This script is written in Go and meant to be used like a normal shell script with the help of [gorun](https://launchpad.net/gorun).
 Be sure to edit the script to configure the paths for your server.
 
+You'll probably want to have cron run this script at a certain interval automatically.
+
 The only dependencies are Go, gorun, and bup.
