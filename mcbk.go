@@ -22,7 +22,6 @@ const (
 	MINECRAFT_LOG_PATH     = ""                                                         //Path to minecraft server log
 	MINECRAFT_DIR          = ""                                                         //The directory to be backed up
 	VERIFY_COMMAND_TIMEOUT = 10 * time.Second                                           //May need to be adjusted for saving large worlds
-	SLEEP_DELAY            = 250 * time.Millisecond                                     //Don't change unless you know what you're doing
 )
 
 var logger *log.Logger
@@ -31,6 +30,11 @@ func main() {
 	err := initLogger()
 	if err != nil {
 		println("ERROR OPENING LOG FILE:", err.Error())
+		os.Exit(1)
+	}
+
+	if !isMinecraftAlive() {
+		//Silently exit, nothing to do if minecraft won't respond
 		os.Exit(1)
 	}
 
@@ -72,6 +76,7 @@ func main() {
 	}
 }
 
+// Initializes the global variable (gasp) for the logger
 func initLogger() error {
 	f, err := os.OpenFile(LOG_PATH, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -81,6 +86,12 @@ func initLogger() error {
 	return nil
 }
 
+// Quick check to see if the minecraft server is alive and responsive
+func isMinecraftAlive() bool {
+	return sendCommandAndVerify("list", "players online") == nil
+}
+
+// Checks if the file or directory at the given path exists
 func exists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -92,6 +103,7 @@ func exists(path string) (bool, error) {
 	return false, err
 }
 
+// Does the actual backup portion
 func doBupBackup() error {
 	err := createBackupDirIfNeeded()
 	if err != nil {
@@ -112,6 +124,8 @@ func doBupBackup() error {
 	return nil
 }
 
+// Creates and initializes the current month's bup repo directory, in the
+// case that it does not exist.
 func createBackupDirIfNeeded() error {
 	bupPath := getCurrentBupRepoPath()
 	dirExists, err := exists(bupPath)
@@ -130,6 +144,7 @@ func createBackupDirIfNeeded() error {
 	return nil
 }
 
+// Prunes any old backups, if they exist.
 func pruneOldBackups() error {
 	bupPath := getBupRepoPathToPrune()
 	oldBackupExists, err := exists(bupPath)
@@ -142,6 +157,7 @@ func pruneOldBackups() error {
 	return os.RemoveAll(bupPath)
 }
 
+// Returns the full path to the current month's bup repo directory.
 func getCurrentBupRepoPath() string {
 	now := time.Now()
 	year, month, _ := now.Date()
@@ -149,6 +165,8 @@ func getCurrentBupRepoPath() string {
 	return BACKUP_ROOT + "/" + BACKUP_DIR_PREFIX + "-" + strconv.Itoa(monthNum) + "-" + strconv.Itoa(year)
 }
 
+// Returns the full path to the bup repo directory that should be pruned,
+// which is the repo that is two months old in this case.
 func getBupRepoPathToPrune() string {
 	now := time.Now()
 	before := now.AddDate(0, -2, 0)
@@ -157,57 +175,56 @@ func getBupRepoPathToPrune() string {
 	return BACKUP_ROOT + "/" + BACKUP_DIR_PREFIX + "-" + strconv.Itoa(monthNum) + "-" + strconv.Itoa(year)
 }
 
-func sendCommandAndVerify(str, match string) error {
-	ch := make(chan string)
-	go func() {
-		waitForLogMatch(match)
-		ch <- "match found"
-	}()
-
-	//Give the goroutine a moment to enter the correct state
-	time.Sleep(SLEEP_DELAY)
-
-	sendMinecraftCommand(str)
-	select {
-	case <-ch:
-		return nil
-	case <-time.After(VERIFY_COMMAND_TIMEOUT):
-		return errors.New("Command verification timeout")
-	}
-	return nil
+func sendCommand(command string) error {
+	cmd := exec.Command("screen", "-S", SCREEN_SESSION, "-p", "0", "-X", "stuff", command+"\\r")
+	return cmd.Run()
 }
 
-func waitForLogMatch(match string) error {
+// Sends the given command string to the minecraft server and looks
+// for the the substring match in the server log output to confirm
+// that the command was sucessfully executed.
+func sendCommandAndVerify(command, match string) error {
 	cmd := exec.Command("tail", "-n", "0", "-F", MINECRAFT_LOG_PATH)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	buffer := bufio.NewReader(stdout)
 	defer stdout.Close()
 
+	buffer := bufio.NewReader(stdout)
 	cmd.Start()
 	defer cmd.Process.Kill()
 
-	for {
-		line, err := buffer.ReadString('\n')
-		if err != nil {
-			return err
+	ch := make(chan error, 1)
+	go func() {
+		for {
+			line, err := buffer.ReadString('\n')
+			if err != nil {
+				ch <- err
+				break
+			}
+			matched := strings.Contains(line, match)
+			if matched {
+				ch <- nil
+				break
+			}
 		}
-		matched := strings.Contains(line, match)
-		if matched {
-			break
-		}
+	}()
+
+	sendCommand(command)
+
+	select {
+	case err = <-ch:
+		return err
+	case <-time.After(VERIFY_COMMAND_TIMEOUT):
+		return errors.New("Command verification timeout")
 	}
-	return nil
+	panic("unreachable")
 }
 
-func sendMinecraftCommand(str string) error {
-	cmd := exec.Command("screen", "-S", SCREEN_SESSION, "-p", "0", "-X", "stuff", str+"\\r")
-	return cmd.Run()
-}
-
+// Attempts to say a global message on the minecraft server without verifying
+// that it was sent
 func sayMessage(msg string) {
-	sendCommandAndVerify("say "+msg, "")
+	sendCommand("say " + msg)
 }
