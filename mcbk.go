@@ -192,24 +192,20 @@ func sendCommandAndVerify(command, match string) error {
 	}
 	defer stdout.Close()
 
-	buffer := bufio.NewReader(stdout)
 	cmd.Start()
 	defer cmd.Process.Kill()
 
 	ch := make(chan error, 1)
 	go func() {
-		for {
-			line, err := buffer.ReadString('\n')
-			if err != nil {
-				ch <- err
-				break
-			}
-			matched := strings.Contains(line, match)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			matched := strings.Contains(scanner.Text(), match)
 			if matched {
 				ch <- nil
-				break
+				return
 			}
 		}
+		ch <- scanner.Err();
 	}()
 
 	sendCommand(command)
